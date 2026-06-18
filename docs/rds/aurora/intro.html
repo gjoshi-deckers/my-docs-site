@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Introduction to Amazon Aurora architecture, high availability, and connection patterns.">
+  <title>Amazon Aurora Introduction | AWS Database Documentation</title>
+  <link rel="stylesheet" href="../../../styles.css">
+</head>
+<body>
+  <div class="site-layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <a class="site-title" href="../../../index.html">Database Docs</a>
+
+      <nav class="side-nav">
+        <details open>
+          <summary>AWS RDS</summary>
+          <ul>
+            <li><a class="active" href="./intro.html">Amazon Aurora</a></li>
+            <li><a href="#">Amazon RDS for PostgreSQL</a></li>
+            <li><a href="#">Amazon RDS for MySQL</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>Event Search &amp; Analytics</summary>
+          <ul>
+            <li><a href="../../analytics/kinesis-via-athena/intro.html">Kinesis Event Search With Athena</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>NoSQL Databases</summary>
+          <ul>
+            <li><a href="#">Amazon DynamoDB</a></li>
+            <li><a href="#">MongoDB</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>Reference</summary>
+          <ul>
+            <li><a href="../../../index.html">Root Home</a></li>
+          </ul>
+        </details>
+      </nav>
+    </aside>
+
+    <main class="doc-content">
+      <nav class="breadcrumb" aria-label="Breadcrumb">
+        <a href="../../../index.html">Home</a>
+        <span>/</span>
+        <span>AWS RDS</span>
+        <span>/</span>
+        <span>Amazon Aurora</span>
+      </nav>
+
+      <article>
+        <header class="doc-header">
+          <p class="eyebrow">AWS RDS</p>
+          <h1>Amazon Aurora Introduction</h1>
+          <p class="lead">
+            Amazon Aurora is a fully managed relational database engine from AWS that is compatible
+            with MySQL and PostgreSQL. It is designed for high availability, distributed storage,
+            automatic failover, read scaling, and disaster recovery.
+          </p>
+        </header>
+
+        <section>
+          <h2>What Is Amazon Aurora?</h2>
+          <p>
+            Aurora is an AWS-managed database service built for enterprise relational workloads.
+            Unlike traditional database deployments where compute and storage are tightly coupled,
+            Aurora separates database instances from a distributed cluster volume. This architecture
+            allows Aurora to replicate data across Availability Zones, add reader instances quickly,
+            and recover from instance failures with minimal operational effort.
+          </p>
+        </section>
+
+        <section>
+          <h2>Architecture Overview</h2>
+          <div class="doc-grid">
+            <figure class="doc-figure">
+              <img
+                src="../../../img/rds/aurora/aurora-cluster.svg"
+                alt="Diagram showing an Amazon Aurora cluster with writer, readers, endpoints, and distributed storage"
+              >
+              <figcaption>
+                Aurora cluster architecture diagram stored under
+                <code>img/rds/aurora/aurora-cluster.svg</code>.
+              </figcaption>
+            </figure>
+
+            <div>
+              <h3>Core Components</h3>
+              <ul>
+                <li><strong>Primary writer instance:</strong> Handles read and write operations for the cluster.</li>
+                <li><strong>Aurora Replicas:</strong> Serve read traffic and can be promoted during failover.</li>
+                <li><strong>Cluster volume:</strong> Shared distributed storage replicated across Availability Zones.</li>
+                <li><strong>Cluster endpoint:</strong> Stable endpoint that points to the current writer instance.</li>
+                <li><strong>Reader endpoint:</strong> Load balances read-only connections across Aurora Replicas.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2>Why Aurora Matters</h2>
+          <p>
+            Aurora is often selected for critical workloads because it combines managed operations
+            with database features that are difficult to build and maintain manually. It supports
+            automated backups, fast replica creation, Multi-AZ high availability, performance scaling,
+            and global database patterns for multi-Region disaster recovery.
+          </p>
+        </section>
+
+        <section>
+          <h2>High Availability And Disaster Recovery</h2>
+          <p>
+            In a single Region, Aurora stores cluster data across multiple Availability Zones. If the
+            writer instance becomes unavailable, Aurora can promote an existing replica to become the
+            new writer. For cross-Region disaster recovery, Aurora Global Database can replicate from
+            one primary Region to one or more secondary Regions.
+          </p>
+        </section>
+
+        <section>
+          <h2>Example Connection String</h2>
+          <p>
+            Applications normally connect to the Aurora cluster endpoint for writes. The following
+            example shows a PostgreSQL-compatible Aurora connection string. Replace the host,
+            database name, user, and password with values from your environment.
+          </p>
+
+          <pre><code>postgresql://app_user:change_me@my-aurora-cluster.cluster-abcdefghijkl.us-east-1.rds.amazonaws.com:5432/app_db?sslmode=require</code></pre>
+
+          <p>
+            For Aurora MySQL-compatible clusters, the same endpoint pattern is used with the MySQL
+            protocol and port <code>3306</code>.
+          </p>
+
+          <pre><code>mysql --host=my-aurora-cluster.cluster-abcdefghijkl.us-east-1.rds.amazonaws.com \
+  --port=3306 \
+  --user=app_user \
+  --password \
+  --ssl-mode=REQUIRED app_db</code></pre>
+        </section>
+
+        <section>
+          <h2>Recommended Next Topics</h2>
+          <ul>
+            <li>Aurora storage architecture</li>
+            <li>Aurora replicas and failover</li>
+            <li>Aurora Global Database for multi-Region DR</li>
+            <li>Backup, restore, and point-in-time recovery</li>
+            <li>Security, encryption, and IAM authentication</li>
+          </ul>
+        </section>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

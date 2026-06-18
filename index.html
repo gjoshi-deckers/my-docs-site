@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Static technical documentation catalog for database services and platform architecture.">
+  <title>Technical Documentation Catalog</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="site-layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <a class="site-title" href="./index.html">Database Docs</a>
+
+      <nav class="side-nav">
+        <details open>
+          <summary>AWS RDS</summary>
+          <ul>
+            <li><a href="./docs/rds/aurora/intro.html">Amazon Aurora</a></li>
+            <li><a href="#">Amazon RDS for PostgreSQL</a></li>
+            <li><a href="#">Amazon RDS for MySQL</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>Event Search &amp; Analytics</summary>
+          <ul>
+            <li><a href="./docs/analytics/kinesis-via-athena/intro.html">Kinesis Event Search With Athena</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>NoSQL Databases</summary>
+          <ul>
+            <li><a href="#">Amazon DynamoDB</a></li>
+            <li><a href="#">MongoDB</a></li>
+          </ul>
+        </details>
+      </nav>
+    </aside>
+
+    <main class="doc-content">
+      <section class="hero">
+        <p class="eyebrow">Technical Documentation</p>
+        <h1>Documentation Catalog</h1>
+        <p class="lead">
+          A scalable static documentation hub for database platforms, cloud architecture,
+          operations, resiliency, and implementation patterns. Use this page as the entry
+          point for current and future technical documentation areas.
+        </p>
+      </section>
+
+      <section>
+        <p class="eyebrow">Featured Area</p>
+        <h2>Currently Available</h2>
+        <div class="cards">
+          <article class="card">
+            <p class="eyebrow">AWS RDS</p>
+            <h3>Amazon Aurora</h3>
+            <p>
+              Architecture, high availability, global databases, connection patterns,
+              and disaster recovery for Amazon Aurora.
+            </p>
+            <a class="button" href="./docs/rds/aurora/intro.html">Open Aurora Docs</a>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Event Search &amp; Analytics</p>
+            <h3>Kinesis Event Search With Athena</h3>
+            <p>
+              Kinesis, Data Firehose, S3 dynamic partitioning, Glue crawler setup,
+              Athena views, metadata enrichment, and Parquet performance planning.
+            </p>
+            <a class="button" href="./docs/analytics/kinesis-via-athena/intro.html">Open Kinesis Docs</a>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <p class="eyebrow">Documentation Areas</p>
+        <h2>Database Platforms</h2>
+        <div class="cards">
+          <article class="card">
+            <p class="eyebrow">Relational</p>
+            <h3>AWS RDS</h3>
+            <p>
+              Managed relational database services including Aurora, PostgreSQL, MySQL,
+              Oracle, SQL Server, and MariaDB.
+            </p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">NoSQL</p>
+            <h3>Key-Value And Document</h3>
+            <p>
+              Future documentation for DynamoDB, MongoDB, document databases,
+              global tables, partitioning, and access patterns.
+            </p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Operations</p>
+            <h3>Reliability And DR</h3>
+            <p>
+              Future runbooks and reference patterns for backups, replication,
+              failover, observability, and recovery testing.
+            </p>
+          </article>
+
+          <article class="card">
+            <p class="eyebrow">Streaming</p>
+            <h3>Raw Archive And Analytics</h3>
+            <p>
+              Patterns for streaming ingestion, S3 raw archives, Glue cataloging,
+              Athena access, metadata traceability, and curated Parquet layers.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <p class="eyebrow">Growth Pattern</p>
+        <h2>Planned Expansion</h2>
+        <p>
+          As new content is added, each technology should get its own folder under
+          <code>docs/</code> and its graphics under <code>img/</code>. This keeps links predictable,
+          pages portable for GitHub Pages, and styles centralized in <code>styles.css</code>.
+        </p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Detailed Kinesis, Firehose, S3, Glue, and Athena implementation guide for raw event archive, dynamic partitioning, metadata enrichment, and query views.">
+  <title>Kinesis Event Search With Athena | Event Search &amp; Analytics Documentation</title>
+  <link rel="stylesheet" href="../../../styles.css">
+</head>
+<body>
+  <div class="site-layout">
+    <aside class="sidebar" aria-label="Documentation navigation">
+      <a class="site-title" href="../../../index.html">Database Docs</a>
+
+      <nav class="side-nav">
+        <details open>
+          <summary>AWS RDS</summary>
+          <ul>
+            <li><a href="../../rds/aurora/intro.html">Amazon Aurora</a></li>
+            <li><a href="#">Amazon RDS for PostgreSQL</a></li>
+            <li><a href="#">Amazon RDS for MySQL</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>Event Search &amp; Analytics</summary>
+          <ul>
+            <li><a class="active" href="./intro.html">Kinesis Event Search With Athena</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>NoSQL Databases</summary>
+          <ul>
+            <li><a href="#">Amazon DynamoDB</a></li>
+            <li><a href="#">MongoDB</a></li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>Reference</summary>
+          <ul>
+            <li><a href="../../../index.html">Root Home</a></li>
+          </ul>
+        </details>
+      </nav>
+    </aside>
+
+    <main class="doc-content">
+      <nav class="breadcrumb" aria-label="Breadcrumb">
+        <a href="../../../index.html">Home</a>
+        <span>/</span>
+        <span>Event Search &amp; Analytics</span>
+        <span>/</span>
+        <span>Kinesis Event Search With Athena</span>
+      </nav>
+
+      <article>
+        <header class="doc-header">
+          <p class="eyebrow">Event Search &amp; Analytics</p>
+          <h1>Kinesis Event Search With Athena</h1>
+          <p class="lead">
+            This document explains the end-to-end pattern implemented for moving Kinesis messages
+            through Amazon Data Firehose into S3, partitioning the files by message type, enriching
+            records with Kinesis metadata, crawling the raw archive with Glue, and exposing a clean
+            Athena view for table-style analysis.
+          </p>
+        </header>
+
+        <section>
+          <h2>Why This Solution Was Needed</h2>
+          <p>
+            Developers and support teams often need to answer practical investigation questions:
+            did a specific message arrive, what was inside it, which Kinesis shard and sequence number
+            carried it, and did it reach S3 correctly? Looking directly in Kinesis can help for immediate
+            troubleshooting, but it is not a comfortable or durable investigation interface.
+          </p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Challenge</th>
+                <th>Why It Happens</th>
+                <th>Impact On The Team</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Short retention window</td>
+                <td>Kinesis stores records only for the configured retention period.</td>
+                <td>Older messages may no longer be available when an incident or reconciliation request arrives.</td>
+              </tr>
+              <tr>
+                <td>Shard-oriented access</td>
+                <td>Records are distributed across shards based on the partition key.</td>
+                <td>Investigators need to know which shard to inspect, or they must scan across shards manually.</td>
+              </tr>
+              <tr>
+                <td>Sequence number dependency</td>
+                <td>Precise retrieval often depends on knowing the Kinesis sequence number or an iterator position.</td>
+                <td>If the sequence number was not captured elsewhere, finding the exact message is slow and uncertain.</td>
+              </tr>
+              <tr>
+                <td>No SQL-style search</td>
+                <td>Kinesis does not provide native filtering by fields inside the JSON payload.</td>
+                <td>Searching by customer id, account number, brand, status, or message type requires custom code or manual inspection.</td>
+              </tr>
+              <tr>
+                <td>Encoded payloads</td>
+                <td>Kinesis and Firehose Lambda events represent record data as bytes or base64-encoded strings.</td>
+                <td>Teams must decode the payload before they can confirm the business content.</td>
+              </tr>
+              <tr>
+                <td>Nested and stringified JSON</td>
+                <td>The business payload is inside <code>events[0].data</code> as a JSON string.</td>
+                <td>Even after retrieval, the team still has to parse inner JSON before useful fields are visible.</td>
+              </tr>
+              <tr>
+                <td>Operational access limits</td>
+                <td>Not every analyst or support engineer should have direct stream read permissions.</td>
+                <td>Debugging becomes dependent on a smaller group of AWS operators or developers.</td>
+              </tr>
+              <tr>
+                <td>Manual correlation</td>
+                <td>Kinesis metadata and payload data are separate unless explicitly stored together.</td>
+                <td>Teams may struggle to prove which S3 object, Athena row, or downstream record came from which Kinesis message.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>Typical Support Questions</h3>
+          <p>
+            A typical investigation question is not "show me the next record in shard 3." It is usually
+            closer to "find the Customers message for account <code>10770331-TEVA</code> that arrived
+            around this time" or "confirm whether sequence number <code>496685...</code> was delivered
+            to S3." Kinesis alone does not make those questions easy to answer because it is optimized
+            for streaming consumption, not ad hoc analytics.
+          </p>
+
+          <div class="callout">
+            <strong>Design decision:</strong> use S3 as the durable message archive and Athena as the
+            searchable support interface, while preserving Kinesis shard, partition key, sequence number,
+            and arrival timestamp on every queryable row.
+          </div>
+        </section>
+
+        <section>
+          <h2>Athena As The Saviour</h2>
+          <p>
+            Athena gives developers and support teams a familiar SQL interface over the raw archive.
+            Instead of reading shards, decoding records, and manually parsing nested strings, teams can
+            query a saved view and filter by business fields or Kinesis metadata.
+          </p>
+
+          <ul>
+            <li><strong>Longer retention:</strong> S3 becomes the durable raw archive, independent of Kinesis retention.</li>
+            <li><strong>SQL access:</strong> Athena can filter by account number, brand, customer id, partition key, or sequence number.</li>
+            <li><strong>Line-level metadata:</strong> each flattened row carries the Kinesis shard id, sequence number, and arrival timestamp.</li>
+            <li><strong>Lower operational friction:</strong> support and data teams can query Athena instead of directly reading Kinesis shards.</li>
+            <li><strong>Auditability:</strong> S3 keeps the original message structure, while Athena views make the data easier to inspect.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Executive Summary</h2>
+          <p>
+            The working solution keeps the original producer message shape, writes raw records to S3
+            through Firehose, extracts <code>events[0].partitionKey</code> for S3 folder routing, enriches
+            each record with Firehose and Kinesis metadata through a Firehose Lambda transformation,
+            and uses Athena views to flatten the nested arrays into queryable customer rows.
+          </p>
+
+          <div class="callout">
+            <strong>Current outcome:</strong> records land under folders such as
+            <code>partition_id=Customers/</code>, Athena can query the raw Glue table, and a saved
+            view returns one row per customer account with the Kinesis sequence number, shard id,
+            partition key, and arrival timestamp repeated on every row.
+          </div>
+        </section>
+
+        <section>
+          <h2>Architecture Flow</h2>
+          <ol class="flow-list">
+            <li><strong>Producer:</strong> sends a Kinesis record whose payload contains an <code>events</code> array.</li>
+            <li><strong>Kinesis Data Stream:</strong> stores the event and assigns shard, sequence, and arrival metadata.</li>
+            <li><strong>Amazon Data Firehose:</strong> reads from the Kinesis stream and applies dynamic partitioning.</li>
+            <li><strong>Firehose Lambda transformation:</strong> enriches the original payload with available Kinesis metadata.</li>
+            <li><strong>Amazon S3 raw archive:</strong> stores newline-delimited raw JSON files under partitioned prefixes.</li>
+            <li><strong>AWS Glue Crawler:</strong> creates or updates a raw Glue Data Catalog table.</li>
+            <li><strong>Amazon Athena:</strong> queries the raw table and exposes a reusable flattened view.</li>
+          </ol>
+
+          <pre><code>Producer
+  -> Kinesis Data Stream
+  -> Data Firehose
+  -> Lambda transform adds metadata
+  -> S3 raw archive partition_id=Customers/yyyy/MM/dd/
+  -> Glue raw table
+  -> Athena customer_flat_v view</code></pre>
+        </section>
+
+        <section>
+          <h2>Source Message Shape</h2>
+          <p>
+            The producer sends a wrapper JSON object. The important routing field is
+            <code>events[0].partitionKey</code>. The business payload is inside
+            <code>events[0].data</code> as a JSON string.
+          </p>
+
+          <pre><code>{
+  "events": [
+    {
+      "data": "{ \"party\": [ ... customer payload ... ] }",
+      "partitionKey": "Customers"
+    }
+  ]
+}</code></pre>
+
+          <p>
+            This shape is valid for routing and raw archival, but Glue sees <code>data</code> as a
+            string. That is why Athena uses <code>json_parse(e.data)</code> inside the saved view to
+            expose normal columns.
+          </p>
+        </section>
+
+        <section>
+          <h2>Why Dynamic Partitioning Was Configured This Way</h2>
+          <p>
+            Firehose dynamic partitioning was needed so records of different message types land in
+            separate S3 folders. Since the partition key is present in the payload as
+            <code>events[0].partitionKey</code>, Firehose can extract it with inline JSON parsing.
+          </p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Firehose Field</th>
+                <th>Configured Value</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Dynamic partitioning</td>
+                <td>Enabled</td>
+                <td>Routes records to S3 prefixes based on extracted metadata.</td>
+              </tr>
+              <tr>
+                <td>Inline parsing for JSON</td>
+                <td>Enabled</td>
+                <td>Allows Firehose to run JQ expressions against the source record.</td>
+              </tr>
+              <tr>
+                <td>Key name</td>
+                <td><code>partitionKey</code></td>
+                <td>Name used by the S3 prefix token.</td>
+              </tr>
+              <tr>
+                <td>JQ expression</td>
+                <td><code>.events[0].partitionKey</code></td>
+                <td>Extracts values such as <code>Customers</code>.</td>
+              </tr>
+              <tr>
+                <td>S3 bucket prefix</td>
+                <td><code>partition_id=!{partitionKeyFromQuery:partitionKey}/!{timestamp:yyyy}/!{timestamp:MM}/!{timestamp:dd}/</code></td>
+                <td>Creates folders by message type and date.</td>
+              </tr>
+              <tr>
+                <td>Error prefix</td>
+                <td><code>errors/!{firehose:error-output-type}/!{timestamp:yyyy}/!{timestamp:MM}/!{timestamp:dd}/</code></td>
+                <td>Separates failed delivery, processing, or parsing records.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section>
+          <h2>Why Newline Delimited JSON Matters</h2>
+          <p>
+            Athena JSON SerDe expects one complete JSON object per line. During testing, pretty-printed
+            multi-line JSON caused read errors because Athena tried to parse individual lines instead of
+            full records. The fix was to send compact single-line JSON to Kinesis and enable the Firehose
+            newline delimiter setting.
+          </p>
+
+          <pre><code>{"events":[{"data":"{\"party\":[...]}","partitionKey":"Customers"}]}
+{"events":[{"data":"{\"party\":[...]}","partitionKey":"Customers"}]}</code></pre>
+
+          <div class="callout warning">
+            <strong>Operational note:</strong> if multiple Firehose records are written to the same S3
+            object without a newline delimiter, Athena can see glued JSON objects and fail to parse them.
+          </div>
+        </section>
+
+        <section>
+          <h2>Lambda Metadata Enrichment</h2>
+          <p>
+            Firehose can use Kinesis metadata for delivery processing, but it does not automatically
+            write that metadata into S3. A Firehose Lambda transformation was added so metadata becomes
+            part of the delivered JSON record and can be queried later.
+          </p>
+
+          <h3>Metadata Captured</h3>
+          <ul>
+            <li><code>firehose_record_id</code> for Firehose delivery traceability.</li>
+            <li><code>firehose_arrival_timestamp</code> for Firehose processing time.</li>
+            <li><code>kinesis_shard_id</code> to identify the source shard.</li>
+            <li><code>kinesis_partition_key</code> to confirm routing value.</li>
+            <li><code>kinesis_sequence_number</code> to trace back to Kinesis Data Viewer.</li>
+            <li><code>kinesis_subsequence_number</code> for aggregated-record scenarios.</li>
+            <li><code>kinesis_arrival_timestamp</code> for when Kinesis received the message.</li>
+          </ul>
+
+          <h3>Delivered S3 Record Shape</h3>
+          <pre><code>{
+  "events": [
+    {
+      "data": "{ \"party\": [ ... ] }",
+      "partitionKey": "Customers"
+    }
+  ],
+  "_firehose_metadata": {
+    "firehose_record_id": "shardId-000000000003...",
+    "kinesis_shard_id": "shardId-000000000003",
+    "kinesis_partition_key": "Customers",
+    "kinesis_sequence_number": "49668599872568290257233820367181262314268963292089155634",
+    "kinesis_arrival_timestamp": 1781762871480
+  }
+}</code></pre>
+        </section>
+
+        <section>
+          <h2>Glue Crawler Design</h2>
+          <p>
+            Glue is used to create the raw table metadata for Athena. Because different partition keys
+            can represent very different JSON schemas, each message type should have its own crawler or
+            stable S3 source path.
+          </p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th>Recommendation</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>S3 source path</td>
+                <td><code>s3://om-stream-kinesis-archive/partition_id=Customers/</code></td>
+                <td>Restricts the crawler to one logical dataset.</td>
+              </tr>
+              <tr>
+                <td>Grouping behavior</td>
+                <td>Create a single schema for each S3 path</td>
+                <td>Prevents one table per Firehose output file.</td>
+              </tr>
+              <tr>
+                <td>Subsequent runs</td>
+                <td>Crawl all sub-folders during testing</td>
+                <td>Safest while schema and files are being validated.</td>
+              </tr>
+              <tr>
+                <td>Schema change policy</td>
+                <td>Update table definition</td>
+                <td>Allows new top-level fields such as <code>_firehose_metadata</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="callout">
+            <strong>Important:</strong> test files with different structures caused Glue to create many
+            file-named tables. The fix was to remove old inconsistent test files and keep only files
+            with the final stable structure.
+          </div>
+        </section>
+
+        <section>
+          <h2>Athena View For Line-Level Querying</h2>
+          <p>
+            The raw Glue table shows the wrapper JSON as nested arrays and a string payload. A saved
+            Athena view flattens <code>events</code>, parses <code>data</code>, unnests
+            <code>party</code> and <code>customers</code>, and attaches Kinesis metadata to every
+            resulting row.
+          </p>
+
+          <pre><code>CREATE OR REPLACE VIEW customer_flat_v AS
+WITH parsed AS (
+  SELECT
+    _firehose_metadata,
+    e.partitionkey,
+    CAST(
+      json_parse(e.data) AS ROW(
+        party ARRAY(
+          ROW(
+            party_identifier VARCHAR,
+            customer_name VARCHAR,
+            account_type_code VARCHAR,
+            account_type_name VARCHAR,
+            status VARCHAR,
+            parent_number VARCHAR,
+            customers ARRAY(
+              ROW(
+                customer_identifier VARCHAR,
+                party_identifier VARCHAR,
+                account_number VARCHAR,
+                secondary_customer_name VARCHAR,
+                status VARCHAR,
+                account_status_name VARCHAR,
+                acct_class_id VARCHAR,
+                acct_class_name VARCHAR,
+                collector_id VARCHAR,
+                collector_name VARCHAR,
+                cust_freight_term_code VARCHAR,
+                cust_freight_term_name VARCHAR,
+                ucc128_label_format VARCHAR,
+                apply_past_cancel_hold VARCHAR,
+                zero_freight_customer VARCHAR,
+                group_invoices_by_bill_to VARCHAR,
+                cust_freight_account VARCHAR,
+                sales_channel_code VARCHAR,
+                sales_channel_name VARCHAR,
+                demand_class_code VARCHAR,
+                distributor_channel VARCHAR,
+                brand VARCHAR,
+                ship_method VARCHAR
+              )
+            )
+          )
+        )
+      )
+    ) AS payload
+  FROM customerpartition_id_customers t
+  CROSS JOIN UNNEST(t.events) AS x(e)
+)
+SELECT
+  partitionkey,
+  _firehose_metadata.kinesis_shard_id,
+  _firehose_metadata.kinesis_partition_key,
+  _firehose_metadata.kinesis_sequence_number,
+  from_unixtime(_firehose_metadata.kinesis_arrival_timestamp / 1000) AS kinesis_arrival_time,
+  p.party_identifier,
+  p.customer_name,
+  p.status AS party_status,
+  c.customer_identifier,
+  c.account_number,
+  c.secondary_customer_name,
+  c.status AS customer_status,
+  c.brand,
+  c.ship_method
+FROM parsed
+CROSS JOIN UNNEST(payload.party) AS x(p)
+CROSS JOIN UNNEST(p.customers) AS y(c);</code></pre>
+        </section>
+
+        <section>
+          <h2>Benefits Of The Implemented Pattern</h2>
+          <div class="cards">
+            <article class="card">
+              <p class="eyebrow">Routing</p>
+              <h3>Clean S3 Folder Separation</h3>
+              <p>
+                Dynamic partitioning sends each message type to a predictable folder such as
+                <code>partition_id=Customers/</code>, which keeps schemas isolated.
+              </p>
+            </article>
+
+            <article class="card">
+              <p class="eyebrow">Traceability</p>
+              <h3>Kinesis Metadata In S3</h3>
+              <p>
+                Sequence number, shard id, partition key, and arrival timestamp can be queried in Athena
+                and matched back to Kinesis Data Viewer.
+              </p>
+            </article>
+
+            <article class="card">
+              <p class="eyebrow">Usability</p>
+              <h3>Reusable Athena View</h3>
+              <p>
+                Users do not need to manually parse nested JSON every time. They query
+                <code>customer_flat_v</code> like a normal table.
+              </p>
+            </article>
+
+            <article class="card">
+              <p class="eyebrow">Operations</p>
+              <h3>Raw Archive Preserved</h3>
+              <p>
+                The original message remains available in S3 for replay, audit, troubleshooting, and
+                future transformation into Parquet.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section>
+          <h2>Performance Roadmap</h2>
+          <p>
+            The current view works well for validation and operational lookups. For high-volume reporting
+            across thousands of files, the next step is to build a curated Parquet layer. Parquet reduces
+            scanned data, improves compression, avoids repeated JSON parsing, and performs better when
+            combined with file compaction.
+          </p>
+
+          <pre><code>Raw S3 JSON archive
+  -> Glue ETL or Athena CTAS
+  -> Parse events[0].data
+  -> Flatten customer rows
+  -> Write compacted Parquet
+  -> Athena curated table</code></pre>
+
+          <p>
+            Target Parquet file sizes should generally be in the <code>128 MB</code> to
+            <code>512 MB</code> range. This avoids the small-files problem caused by thousands of tiny
+            Firehose output objects.
+          </p>
+        </section>
+
+        <section>
+          <h2>Operational Checklist</h2>
+          <ul>
+            <li>Send compact single-line JSON to Kinesis.</li>
+            <li>Keep Firehose newline delimiter enabled.</li>
+            <li>Keep dynamic partition key name and S3 prefix token aligned.</li>
+            <li>Run the Glue crawler again only when the outer schema or partitions change.</li>
+            <li>Keep test files with incompatible shapes out of the production crawler path.</li>
+            <li>Query the saved Athena view for day-to-day validation and traceability.</li>
+            <li>Plan a Parquet compaction layer before broad production reporting.</li>
+          </ul>
+        </section>
+      </article>
+    </main>
+  </div>
+</body>
+</html>
